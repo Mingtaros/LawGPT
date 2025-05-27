@@ -81,6 +81,13 @@ def create_uud_knowledge_base(pdf_path="documents"):
         vector_db=vector_db,
     )
 
+    with open("data/peraturan_go_id_output.json", "r") as f:
+        peraturan_go_id_urls = json.load(f)
+
+    if not peraturan_go_id_urls:
+        # if there's no peraturan go id urls, return law kb only
+        return law_kb
+    
     # make new collection for peraturan go id
     vector_db = ChromaDb(
         collection="peraturan_go_id_kb",
@@ -89,14 +96,12 @@ def create_uud_knowledge_base(pdf_path="documents"):
         embedder=SentenceTransformerEmbedder(),
     )
 
-    with open("data/peraturan_go_id_output.json", "r") as f:
-        peraturan_go_id_urls = json.load(f)
-
     peraturan_go_id_kb = PDFUrlKnowledgeBase(
         urls=peraturan_go_id_urls,
         vector_db=vector_db,
     )
 
+    # make a combined kb to use
     combined_kb = CombinedKnowledgeBase(
         law_kb,
         peraturan_go_id_kb,

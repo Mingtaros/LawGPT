@@ -4,6 +4,7 @@ os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 
 # 2) Monkey-patch torch.Module.to to fall back to to_empty() on meta-tensor errors
 from textwrap import dedent
+import json
 import torch
 from torch.nn.modules.module import Module as _TorchModule
 _orig_to = _TorchModule.to
@@ -34,7 +35,7 @@ from agno.tools.googlesearch import GoogleSearchTools
 from agno.knowledge.pdf import PDFKnowledgeBase
 from agno.knowledge.pdf_url import PDFUrlKnowledgeBase
 from agno.vectordb.pgvector import PgVector
-
+from agno.knowledge import KnowledgeBase
 # __import__('pysqlite3')
 import sys
 # sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
@@ -51,8 +52,24 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN")
 os.environ["HUGGINGFACE_API_KEY"] = os.getenv("HF_TOKEN")
 
+class CombinedKnowledgeBase(KnowledgeBase):
+    def __init__(self, *knowledge_bases):
+        self.knowledge_bases = knowledge_bases
+
+    def query(self, query: str, **kwargs):
+        results = []
+        for kb in self.knowledge_bases:
+            try:
+                kb_results = kb.query(query, **kwargs)
+                if kb_results:
+                    results.extend(kb_results)
+            except Exception as e:
+                print(f"Error querying knowledge base {kb}: {e}")
+        return results
+
 
 def create_uud_knowledge_base(pdf_path="documents"):
+    # make new collection for law
     vector_db = ChromaDb(
         collection="law_kb",
         path="cache/chromadb",
@@ -63,15 +80,37 @@ def create_uud_knowledge_base(pdf_path="documents"):
         path=pdf_path,
         vector_db=vector_db,
     )
-    return law_kb
+
+    # make new collection for peraturan go id
+    vector_db = ChromaDb(
+        collection="peraturan_go_id_kb",
+        path="cache/chromadb",
+        persistent_client=True,
+        embedder=SentenceTransformerEmbedder(),
+    )
+
+    with open("data/peraturan_go_id_output.json", "r") as f:
+        peraturan_go_id_urls = json.load(f)
+
+    peraturan_go_id_kb = PDFUrlKnowledgeBase(
+        urls=peraturan_go_id_urls,
+        vector_db=vector_db,
+    )
+
+    combined_kb = CombinedKnowledgeBase(
+        law_kb,
+        peraturan_go_id_kb,
+    )
+
+    return combined_kb
 
 def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
-    law_kb = create_uud_knowledge_base(pdf_path="documents")
-    law_kb.load(recreate=False)
-    # Instead of law_kb.load(), do a manual insert with per-doc error handling
+    combined_kb = create_uud_knowledge_base(pdf_path="documents")
+    combined_kb.load(recreate=False)
+    # Instead of combined_kb.load(), do a manual insert with per-doc error handling
     # try:
     #     # Get only the docs that aren’t already in the collection
-    #     docs_to_load = law_kb.filter_existing_documents()
+    #     docs_to_load = combined_kb.filter_existing_documents()
         
     #     safe_docs = []
     #     safe_filters = []
@@ -83,7 +122,7 @@ def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
 
     #         try:
     #             # attempt embedding
-    #             doc.embed(embedder=law_kb.embedder)
+    #             doc.embed(embedder=combined_kb.embedder)
     #             safe_docs.append(doc)
     #             safe_filters.append(doc.meta_data or {})
     #         except Exception as e:
@@ -91,7 +130,7 @@ def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
     #             continue
         
     #     if safe_docs:
-    #         law_kb.vector_db.insert(
+    #         combined_kb.vector_db.insert(
     #             documents=safe_docs,
     #             filters=safe_filters
     #         )
@@ -132,7 +171,7 @@ def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
             "serta menyebutkan sanksi yang mungkin dikenakan sesuai dengan hukum dan peraturan yang berlaku di Indonesia."
         ),
         instructions=[dedent(system_prompt)],
-        knowledge=law_kb,
+        knowledge=combined_kb,
         search_knowledge=True,
         tools=[
             GoogleSearchTools()

@@ -1,0 +1,1 @@
+from .peraturan_go_id_spider import PeraturanSpider

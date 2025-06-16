@@ -10,8 +10,15 @@ Simple AI-based application to help Indonesians know more about their ongoing ca
     </tr>
 </table>
 
-## How to Run
-1. Install necessary packages `pip install -r requirements.txt`
+## How to Run Crawler
+1. Delete the file `data/peraturan_go_id_output.jsonl`.
+2. Go back to root directory and then go to `src/crawler/`.
+3. Run `scrapy crawl peraturangoid -o ../../data/peraturan_go_id_output.jsonl`.
+4. Wait until it finishes.
+5. After it finishes, go to `data/peraturan_go_id_output.jsonl` to see the outputs.
+
+## How to Run Main Module
+1. Install necessary packages `pip install -r requirements.txt`.
 2. Make `.env` file with the example, and fill in the necessary keys.
 3. Turn on Docker service and Run Posgres VectorDB:
     ```shell

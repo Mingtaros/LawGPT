@@ -12,5 +12,6 @@ pycountry==24.6.1
 pypdf==5.4.0
 SQLAlchemy==2.0.40
 sentence-transformers==4.1.0
+tensorflow==2.16.2
 numpy<2
 # pysqlite3-binary

@@ -34,8 +34,8 @@ from agno.models.openai import OpenAIChat
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.knowledge.pdf import PDFKnowledgeBase
 from agno.knowledge.pdf_url import PDFUrlKnowledgeBase
+from agno.knowledge.combined import CombinedKnowledgeBase
 from agno.vectordb.pgvector import PgVector
-from agno.knowledge import KnowledgeBase
 # __import__('pysqlite3')
 import sys
 # sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
@@ -52,25 +52,10 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN")
 os.environ["HUGGINGFACE_API_KEY"] = os.getenv("HF_TOKEN")
 
-class CombinedKnowledgeBase(KnowledgeBase):
-    def __init__(self, *knowledge_bases):
-        self.knowledge_bases = knowledge_bases
-
-    def query(self, query: str, **kwargs):
-        results = []
-        for kb in self.knowledge_bases:
-            try:
-                kb_results = kb.query(query, **kwargs)
-                if kb_results:
-                    results.extend(kb_results)
-            except Exception as e:
-                print(f"Error querying knowledge base {kb}: {e}")
-        return results
-
 
 def create_uud_knowledge_base(pdf_path="documents"):
     # make new collection for law
-    vector_db = ChromaDb(
+    law_vector_db = ChromaDb(
         collection="law_kb",
         path="cache/chromadb",
         persistent_client=True,
@@ -78,18 +63,18 @@ def create_uud_knowledge_base(pdf_path="documents"):
     )
     law_kb = PDFKnowledgeBase(
         path=pdf_path,
-        vector_db=vector_db,
+        vector_db=law_vector_db,
     )
 
-    with open("data/peraturan_go_id_output.json", "r") as f:
-        peraturan_go_id_urls = json.load(f)
+    with open("data/peraturan_go_id_output.jsonl", "r") as f:
+        peraturan_go_id_urls = [json.loads(line)["url"] for line in f]
 
     if not peraturan_go_id_urls:
         # if there's no peraturan go id urls, return law kb only
         return law_kb
     
     # make new collection for peraturan go id
-    vector_db = ChromaDb(
+    peraturan_vector_db = ChromaDb(
         collection="peraturan_go_id_kb",
         path="cache/chromadb",
         persistent_client=True,
@@ -98,20 +83,24 @@ def create_uud_knowledge_base(pdf_path="documents"):
 
     peraturan_go_id_kb = PDFUrlKnowledgeBase(
         urls=peraturan_go_id_urls,
-        vector_db=vector_db,
+        vector_db=peraturan_vector_db,
     )
 
     # make a combined kb to use
     combined_kb = CombinedKnowledgeBase(
-        law_kb,
-        peraturan_go_id_kb,
+        sources=[
+            law_kb,
+            peraturan_go_id_kb,
+        ],
+        vector_db=peraturan_vector_db
     )
 
     return combined_kb
+    # return peraturan_go_id_kb
 
 def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
     combined_kb = create_uud_knowledge_base(pdf_path="documents")
-    combined_kb.load(recreate=False)
+    combined_kb.load(recreate=True)
     # Instead of combined_kb.load(), do a manual insert with per-doc error handling
     # try:
     #     # Get only the docs that aren’t already in the collection
@@ -148,15 +137,15 @@ def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
         system_prompt = system_prompt_f.read()
     
     # Define which provider to use: 'groq' or 'openai'
-    model_provider = "groq"
+    MODEL_PROVIDER = "groq"
 
     # Select model based on provider
-    if model_provider == "groq":
+    if MODEL_PROVIDER == "groq":
         model = Groq(
             id="llama-3.3-70b-versatile",
             temperature=0.2 
         )
-    elif model_provider == "openai":
+    elif MODEL_PROVIDER == "openai":
         model = OpenAIChat(
             id="gpt-4o",
             response_format="json",
@@ -164,7 +153,7 @@ def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
             top_p=0.2
         )
     else:
-        raise ValueError(f"Unsupported model provider: {model_provider}")
+        raise ValueError(f"Unsupported model provider: {MODEL_PROVIDER}")
 
     agent = Agent(
         name="law-agent",

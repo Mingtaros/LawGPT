@@ -55,11 +55,12 @@ os.environ["HUGGINGFACE_API_KEY"] = os.getenv("HF_TOKEN")
 
 def create_uud_knowledge_base(pdf_path="documents"):
     # make new collection for law
-    law_vector_db = ChromaDb(
-        collection="law_kb",
-        path="cache/chromadb",
-        persistent_client=True,
-        embedder=SentenceTransformerEmbedder(),
+    law_vector_db = PgVector(
+        table_name=f"law_kb",
+        db_url="postgresql+psycopg://ai:ai@localhost:5532/ai",
+        # embedder=SentenceTransformerEmbedder(),
+        # ^ NOTE: if this is turned off, by default use OpenAIEmbedder.
+        # Can only work if OPENAI_API_KEY is valid
     )
     law_kb = PDFKnowledgeBase(
         path=pdf_path,
@@ -68,17 +69,18 @@ def create_uud_knowledge_base(pdf_path="documents"):
 
     with open("data/peraturan_go_id_output.jsonl", "r") as f:
         peraturan_go_id_urls = [json.loads(line)["url"] for line in f]
+        # deduplicate
+        peraturan_go_id_urls = list(set(peraturan_go_id_urls))
 
     if not peraturan_go_id_urls:
         # if there's no peraturan go id urls, return law kb only
         return law_kb
     
     # make new collection for peraturan go id
-    peraturan_vector_db = ChromaDb(
-        collection="peraturan_go_id_kb",
-        path="cache/chromadb",
-        persistent_client=True,
-        embedder=SentenceTransformerEmbedder(),
+    peraturan_vector_db = PgVector(
+        table_name="peraturan_go_id_kb",
+        db_url="postgresql+psycopg://ai:ai@localhost:5532/ai",
+        # embedder=SentenceTransformerEmbedder(),
     )
 
     peraturan_go_id_kb = PDFUrlKnowledgeBase(
@@ -100,7 +102,7 @@ def create_uud_knowledge_base(pdf_path="documents"):
 
 def create_agent(system_prompt_path="data/system_prompt.txt", debug_mode=True):
     combined_kb = create_uud_knowledge_base(pdf_path="documents")
-    combined_kb.load(recreate=True)
+    combined_kb.load(recreate=False)
     # Instead of combined_kb.load(), do a manual insert with per-doc error handling
     # try:
     #     # Get only the docs that aren’t already in the collection
